@@ -1,0 +1,4 @@
+sessions/
+browser-profile/
+*.log
+last-probe.json

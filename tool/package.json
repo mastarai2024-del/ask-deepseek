@@ -1,0 +1,16 @@
+{
+  "name": "deepseek-web-oracle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Session-local, fail-closed DeepSeek Web consultation helper.",
+  "bin": {
+    "deepseek-oracle": "bin/deepseek-oracle.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
