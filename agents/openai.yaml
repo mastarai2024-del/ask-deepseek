@@ -2,7 +2,7 @@ interface:
   display_name: "Ask DeepSeek"
   short_description: "通过已登录的 DeepSeek 网页获取可靠的第二意见"
   brand_color: "#4C6FFF"
-  default_prompt: "使用 $ask-deepseek，以专家模式把当前问题交给已登录的 DeepSeek 网页复核，并由 Codex 独立核验结果。"
+  default_prompt: "使用 $ask-deepseek，在 Codex 内置浏览器中以专家模式把当前问题交给已登录的 DeepSeek 网页复核，并由 Codex 独立核验结果。"
 
 policy:
   allow_implicit_invocation: true
