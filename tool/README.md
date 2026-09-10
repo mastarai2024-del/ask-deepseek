@@ -38,6 +38,8 @@ node bin/deepseek-oracle.mjs ask \
 
 “深度思考”和“智能搜索”是独立的 `aria-pressed` 开关，不是模型模式。`ask` 保留页面已有状态；用户要求精确状态时，由技能通过真实页面设置并复核。
 
+`ask` 只封装 EGO Lite。若 EGO Lite 不可用，调用方按技能的浏览器路由改用当前 Codex 会话可控的 Chrome，再降级到 Codex 内置浏览器；外部适配器不会尝试接管这两个会话。
+
 ## 不确定状态
 
 `meta.json` 使用 `rendered`、`submitting`、`uncertain` 和 `completed` 四种状态。点击发送后若结果未知，工具保留任务空间并拒绝重发。
@@ -59,7 +61,7 @@ node bin/deepseek-oracle.mjs launch --port 9227
 node bin/deepseek-oracle.mjs probe --port 9227
 ```
 
-`launch` 使用 `browser-profile/` 专用 profile；用户需自行登录。`probe` 只读取统一输入区与能力标签计数，结果写入 `last-probe.json`，不发送消息。
+`launch` 使用 `browser-profile/` 专用 profile；用户需自行登录。它会在 macOS、Linux 和 Windows 的常见 Chrome 安装位置及 PATH 中查找可执行文件。`probe` 只读取统一输入区与能力标签计数，结果写入 `last-probe.json`，不发送消息。
 
 ## 验证
 

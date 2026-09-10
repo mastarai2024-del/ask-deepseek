@@ -9,6 +9,7 @@ import {
   selectSendButton,
 } from "../src/deepseek-page.mjs";
 import { buildConsultScript, buildRecoverScript, formatUnstructuredResultError, parsePrefixedJson, shouldCleanupConsult, shouldCleanupRecovery } from "../src/ego-transport.mjs";
+import { defaultChromePath } from "../src/chrome.mjs";
 
 function node(role, name, backendDOMNodeId) {
   return {
@@ -128,9 +129,30 @@ test("an unstructured consult result fails closed as sent/uncertain", () => {
   assert.equal(shouldCleanupRecovery({ result: { answer: "OK" }, failure: null, hardStop: false }), true);
 });
 
-test("the optional CDP path does not assume a missing command exists", () => {
-  const source = requireSource("../src/chrome.mjs");
-  assert.match(source, /spawnSync\("which", \[candidate\]/);
+test("the optional CDP path resolves a Windows Chrome installation before PATH", () => {
+  const chromePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+  const result = defaultChromePath({
+    platform: "win32",
+    env: { ProgramFiles: "C:\\Program Files" },
+    exists: (candidate) => candidate === chromePath,
+    hasCommand: () => false,
+  });
+  assert.equal(result, chromePath);
+});
+
+test("the optional CDP path checks Windows PATH when no known installation exists", () => {
+  const checked = [];
+  const result = defaultChromePath({
+    platform: "win32",
+    env: {},
+    exists: () => false,
+    hasCommand: (command, platform) => {
+      checked.push([command, platform]);
+      return command === "chrome.exe";
+    },
+  });
+  assert.equal(result, "chrome.exe");
+  assert.deepEqual(checked, [["chrome.exe", "win32"]]);
 });
 
 function requireSource(relativePath) {

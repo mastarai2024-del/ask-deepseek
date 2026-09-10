@@ -4,13 +4,43 @@ import path from "node:path";
 
 const DEEPSEEK_URL = "https://chat.deepseek.com/";
 
-export function defaultChromePath() {
-  const candidates = process.platform === "darwin"
+function isFilesystemPath(candidate) {
+  return candidate.startsWith("/") || /^[A-Za-z]:[\\/]/.test(candidate);
+}
+
+function windowsChromePaths(env) {
+  const roots = [
+    env.ProgramFiles,
+    env.PROGRAMFILES,
+    env["ProgramFiles(x86)"],
+    env.PROGRAMFILES_X86,
+    env.LOCALAPPDATA,
+  ].filter(Boolean);
+  return roots.flatMap((root) => [
+    `${root}\\Google\\Chrome\\Application\\chrome.exe`,
+    `${root}\\Chromium\\Application\\chrome.exe`,
+  ]);
+}
+
+function commandExists(command, platform) {
+  const lookup = platform === "win32" ? "where.exe" : "which";
+  return spawnSync(lookup, [command], { stdio: "ignore" }).status === 0;
+}
+
+export function defaultChromePath({
+  platform = process.platform,
+  env = process.env,
+  exists = existsSync,
+  hasCommand = commandExists,
+} = {}) {
+  const candidates = platform === "darwin"
     ? ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium"]
-    : ["google-chrome", "chromium", "chromium-browser"];
+    : platform === "win32"
+      ? [...windowsChromePaths(env), "chrome.exe", "chrome", "chromium.exe", "chromium"]
+      : ["google-chrome", "chromium", "chromium-browser"];
   return candidates.find((candidate) => {
-    if (candidate.includes("/")) return existsSync(candidate);
-    return spawnSync("which", [candidate], { stdio: "ignore" }).status === 0;
+    if (isFilesystemPath(candidate)) return exists(candidate);
+    return hasCommand(candidate, platform);
   });
 }
 

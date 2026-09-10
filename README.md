@@ -32,7 +32,7 @@ DeepSeek 网页已改为单一统一模型。仓库已移除旧版模式选择�
   ↓
 render 本地打包（不联网）
   ↓
-EGO Lite 核验统一输入区与独立能力开关
+浏览器路由：EGO Lite → Chrome → Codex 内置浏览器
   ↓
 唯一发送一次并确认提交
   ↓
@@ -41,7 +41,17 @@ EGO Lite 核验统一输入区与独立能力开关
 Codex 独立核验
 ```
 
-默认浏览器通道是 EGO Lite 的独立任务空间。登录、验证码或用户接管时遵守 EGO Lite 交接边界；任务完成后关闭本任务创建且无需保留的页面。只有 EGO Lite 不可用时，说明原因后才使用其他已授权浏览器或手动粘贴。
+## 浏览器路由
+
+Ask DeepSeek 在发送前按以下顺序选择一个可控通道，并在同一咨询中保持该通道：
+
+1. **EGO Lite**：可用且可控时的首选，使用独立任务空间。
+2. **Chrome**：EGO Lite 缺失、启动失败、不可控或无法完成发送前核验时使用；先报告原因，复用当前 Codex 会话可控的 Chrome。登录、验证码和二次验证由用户完成。
+3. **Codex 内置浏览器**：Chrome 缺失、当前会话无法控制 Chrome，或无法完成发送前核验时使用。该通道只能由当前 Codex 会话操控，不能由外部 Node 适配器接管。
+
+提交状态不确定或用户接管任一通道时，保留该通道只读恢复，不切换浏览器或重发。任务结束后只关闭代理为本次咨询创建、且不再需要的页面。
+
+Windows 使用同一规则：先实际检查 EGO Lite，随后检查 Chrome 的当前会话能力或安装路径，最后落到 Codex 内置浏览器。仓库的 macOS 安装脚本并不代表 Windows 上的可用性结论。
 
 ## 目录
 
@@ -106,7 +116,7 @@ node bin/deepseek-oracle.mjs ask \
   --send
 ```
 
-`ask` 通过 EGO Lite 打开已登录页面，确认唯一统一输入框，填入问题，定位发送控件并读取稳定回答；它保留页面已有的独立开关状态，也没有旧版模式参数。需要指定开关状态时，由技能按真实页面流程设置并复核。
+`ask` 是 EGO Lite 的直接适配器：它打开已登录页面，确认唯一统一输入框，填入问题，定位发送控件并读取稳定回答；它保留页面已有的独立开关状态，也没有旧版模式参数。EGO Lite 不可用时，Codex 按上述浏览器路由改用 Chrome 或内置浏览器；外部适配器不会伪装成能操控这两种会话。需要指定开关状态时，由技能按真实页面流程设置并复核。
 
 会话状态：
 
@@ -129,7 +139,7 @@ node bin/deepseek-oracle.mjs recover \
 
 ## 诊断
 
-`launch` 和 `probe` 是可选的专用 Chrome + CDP 诊断通道：
+`launch` 和 `probe` 是可选的专用 Chrome + CDP 诊断通道，支持 macOS、Linux 和 Windows 的常见 Chrome 路径与 PATH：
 
 ```bash
 node bin/deepseek-oracle.mjs launch --port 9227
