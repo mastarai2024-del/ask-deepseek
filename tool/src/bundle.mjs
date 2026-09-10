@@ -71,7 +71,7 @@ export function buildBundle({ prompt, files }) {
   ].join("\n");
 }
 
-export async function writeBundle({ rootDir, prompt, files, expectedMode }) {
+export async function writeBundle({ rootDir, prompt, files }) {
   const id = new Date().toISOString().replace(/[:.]/g, "-");
   const runDir = path.join(rootDir, "sessions", id);
   await fs.mkdir(runDir, { recursive: true, mode: 0o700 });
@@ -81,7 +81,6 @@ export async function writeBundle({ rootDir, prompt, files, expectedMode }) {
     id,
     createdAt: new Date().toISOString(),
     state: "rendered",
-    expectedMode,
     files: files.map((file) => file.displayPath),
   }, null, 2) + "\n", { mode: 0o600 });
   return { id, runDir, bundle };

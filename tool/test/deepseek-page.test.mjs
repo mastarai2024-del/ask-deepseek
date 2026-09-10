@@ -2,60 +2,46 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  DEFAULT_DEEPSEEK_MODE,
-  DEEPSEEK_MODE_LABELS,
-  inspectDeepSeekMode,
-  isSupportedDeepSeekMode,
+  DEEPSEEK_CAPABILITY_LABELS,
+  DEEPSEEK_COMPOSER_NAME,
+  inspectDeepSeekPage,
   newAssistantText,
   selectSendButton,
 } from "../src/deepseek-page.mjs";
 import { buildConsultScript, buildRecoverScript, formatUnstructuredResultError, parsePrefixedJson, shouldCleanupConsult, shouldCleanupRecovery } from "../src/ego-transport.mjs";
 
-function radio(name, checked, backendDOMNodeId) {
+function node(role, name, backendDOMNodeId) {
   return {
-    role: { value: "radio" },
+    role: { value: role },
     name: { value: name },
     backendDOMNodeId,
-    properties: [{ name: "checked", value: { value: checked } }],
   };
 }
 
-test("inspectDeepSeekMode confirms the observed Expert Mode evidence", () => {
-  const state = inspectDeepSeekMode({
+test("inspectDeepSeekPage confirms the unified composer and capability labels", () => {
+  const state = inspectDeepSeekPage({
     nodes: [
-      radio(DEEPSEEK_MODE_LABELS.quick, "false", 967),
-      radio(DEEPSEEK_MODE_LABELS.expert, "true", 991),
-      radio("识图模式", "false", 1019),
+      node("textbox", `${DEEPSEEK_COMPOSER_NAME} `, 174),
+      node("StaticText", DEEPSEEK_CAPABILITY_LABELS.deepThinking, 246),
+      node("StaticText", DEEPSEEK_CAPABILITY_LABELS.webSearch, 247),
     ],
   });
-  assert.equal(DEFAULT_DEEPSEEK_MODE, "expert");
-  assert.equal(isSupportedDeepSeekMode("expert"), true);
-  assert.equal(isSupportedDeepSeekMode("quick"), true);
-  assert.equal(isSupportedDeepSeekMode("other"), false);
-  assert.equal(state.mode, "expert");
-  assert.equal(state.expert[0].backendDOMNodeId, 991);
-  assert.equal(state.quick[0].checked, false);
+  assert.equal(state.contract, "unified-model");
+  assert.equal(state.composerCount, 1);
+  assert.equal(state.composer.backendDOMNodeId, 174);
+  assert.deepEqual(state.capabilityLabels, { deepThinking: 1, webSearch: 1 });
 });
 
-test("inspectDeepSeekMode detects Fast Mode but fails closed on ambiguous evidence", () => {
-  const fast = inspectDeepSeekMode({
+test("inspectDeepSeekPage fails closed when the composer is missing or duplicated", () => {
+  const duplicated = inspectDeepSeekPage({
     nodes: [
-      radio(DEEPSEEK_MODE_LABELS.quick, true, 1),
-      radio(DEEPSEEK_MODE_LABELS.expert, false, 2),
+      node("textbox", DEEPSEEK_COMPOSER_NAME, 1),
+      node("textbox", DEEPSEEK_COMPOSER_NAME, 2),
     ],
   });
-  assert.equal(fast.mode, "quick");
-
-  const contradictory = inspectDeepSeekMode({
-    nodes: [
-      radio(DEEPSEEK_MODE_LABELS.quick, true, 1),
-      radio(DEEPSEEK_MODE_LABELS.expert, true, 2),
-    ],
-  });
-  assert.equal(contradictory.mode, "unknown");
-
-  const missing = inspectDeepSeekMode({ nodes: [radio(DEEPSEEK_MODE_LABELS.quick, true, 1)] });
-  assert.equal(missing.mode, "unknown");
+  assert.equal(duplicated.contract, "unknown");
+  assert.equal(duplicated.composerCount, 2);
+  assert.equal(inspectDeepSeekPage({ nodes: [] }).contract, "unknown");
 });
 
 test("selectSendButton chooses the rightmost aligned control", () => {
@@ -108,27 +94,8 @@ test("generated Ego consult script is syntactically valid", () => {
   assert.match(script, /await click\("@" \+ candidates\[0\]\.backendDOMNodeId/);
   assert.doesNotMatch(script, /Input\.dispatchMouseEvent/);
   assert.match(script, /\.ds-assistant-message-main-content/);
-  assert.match(script, /const EXPECTED_MODE = "expert"/);
-  assert.match(script, /ensureExpectedMode/);
-  assert.match(script, /select DeepSeek mode/);
-  const quickScript = buildConsultScript({
-    taskName: "quick mode accepted",
-    prompt: "test",
-    marker: "[DEEPSEEK_ORACLE_RUN:test]",
-    responseTimeoutMs: 1000,
-    expectedMode: "quick",
-  });
-  assert.match(quickScript, /const EXPECTED_MODE = "quick"/);
-  assert.throws(
-    () => buildConsultScript({
-      taskName: "unsupported mode rejected",
-      prompt: "test",
-      marker: "[DEEPSEEK_ORACLE_RUN:test]",
-      responseTimeoutMs: 1000,
-      expectedMode: "other",
-    }),
-    /Unsupported DeepSeek mode/,
-  );
+  assert.match(script, /const COMPOSER_SELECTOR = "textarea\[name=\\"search\\"\]"/);
+  assert.match(script, /pageContract: "unified-model"/);
 });
 
 test("parsePrefixedJson ignores unrelated browser output", () => {

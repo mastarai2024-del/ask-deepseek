@@ -1,75 +1,77 @@
 # Ask DeepSeek
 
-一个私有、fail-closed 的 Codex Skill，用来把经过脱敏的技术问题交给已登录的 DeepSeek 网页端做第二意见，再由 Codex 独立核验。它不把 DeepSeek 的回答直接当成事实，也不让 DeepSeek 操作本机。
+一个私有、fail-closed 的 Codex Skill：把经过脱敏的问题交给已登录的 DeepSeek 网页统一模型做第二意见，再由 Codex 独立核验。DeepSeek 不获得本机执行权。
 
-## 适合什么场景
-
-当你说下面这类话时，Skill 会被触发：
+## 触发方式
 
 - “问问 DS……”
-- “问下 DeepSeek……”
 - “让 DeepSeek 复核这个判断。”
 - 显式调用 `$ask-deepseek`。
 
-典型用途是请 DeepSeek 审查一个设计判断、报错解释、边界条件或技术取舍。Codex 会先把上下文改写成具体问题，生成带行号的附件包，再在已登录的 `chat.deepseek.com` 页面发送；拿到回答后，Codex 仍会检查证据、版本匹配度和可执行性，必要时运行测试或查阅一手资料。
+维护或测试本技能本身不会触发真实发送。只有用户明确要求咨询 DeepSeek，发送门禁才成立。
 
-它不适合这些情况：
+## 2026-09-10 页面升级
 
-- 让 DeepSeek 直接修改文件、执行命令、提交 Git 或发布内容。
-- 需要密钥、Cookie、客户资料、完整私有仓库或其他无法脱敏的数据。
-- 想绕过 DeepSeek 登录、验证码、额度、网页限制或私有 API。
+DeepSeek 网页已改为单一统一模型。仓库已移除旧版模式选择、参数、元数据门禁和相应测试。
 
-## 工作方式
+当前实测页面契约：
+
+- 输入框：`textarea[name="search"]`
+- 输入框可访问性名称：“给 DeepSeek 发送消息”
+- 独立能力开关：“深度思考”“智能搜索”，状态来自 `aria-pressed`
+- 回答容器：`.ds-assistant-message-main-content`
+
+升级横幅不是稳定选择器。运行时只依赖输入、发送、提交和回答的可观察状态。
+
+## 工作流
 
 ```text
-Codex 请求
+用户明确要求咨询
   ↓
-重写问题，选择最小附件
+脱敏问题与最小附件
   ↓
 render 本地打包（不联网）
   ↓
-模式门禁：专家模式 / 快速模式
+EGO Lite 核验统一输入区与独立能力开关
   ↓
-已登录 Codex 内置浏览器发送
+唯一发送一次并确认提交
   ↓
 读取稳定回答
   ↓
-Codex 独立核验并采纳、修改或拒绝
+Codex 独立核验
 ```
 
-默认咨询使用 DeepSeek 的“专家模式”。只有用户明确要求时才切换到“快速模式”；其他模式不会自动发送。发送前会从页面可访问性树确认两个唯一的 radio 控件——“专家模式”和“快速模式”——并核对 `checked` 状态。控件缺失、重复、状态冲突或切换后仍未确认时，流程会在发送前停止，不会猜坐标，也不会静默换用另一种模式。
+默认浏览器通道是 EGO Lite 的独立任务空间。登录、验证码或用户接管时遵守 EGO Lite 交接边界；任务完成后关闭本任务创建且无需保留的页面。只有 EGO Lite 不可用时，说明原因后才使用其他已授权浏览器或手动粘贴。
 
-## 目录结构
+## 目录
 
 ```text
 .
-├── SKILL.md                # Codex Skill 入口和安全边界
-├── agents/openai.yaml      # Agent 界面元数据
+├── SKILL.md
+├── agents/openai.yaml
 └── tool/
     ├── bin/deepseek-oracle.mjs
-    ├── src/bundle.mjs              # 本地问题与文件打包
-    ├── src/deepseek-page.mjs      # 模式、发送按钮、回答提取的纯逻辑
-    ├── src/ego-transport.mjs      # 旧版 EGO 备用通道
-    ├── src/chrome.mjs             # 可选 CDP 诊断
+    ├── src/bundle.mjs
+    ├── src/deepseek-page.mjs
+    ├── src/ego-transport.mjs
+    ├── src/chrome.mjs
     └── test/
 ```
 
-当前版本优先使用 Codex 内置浏览器完成自动咨询。`tool/bin/deepseek-oracle.mjs ask` 是旧版 EGO 备用接口；单独的 Node CLI 拿不到 Codex 内置浏览器句柄，所以不应把它当作内置浏览器发送器。
-
 ## 安装
 
-这是 Skill 仓库，不是 npm 包。把整个目录放在你的 Codex 技能目录中，保持 `SKILL.md` 位于仓库根目录：
+这是 Skill 仓库，不是 npm 包。把整个目录克隆到 Codex 技能目录：
 
 ```bash
 gh repo clone mastarai2024-del/ask-deepseek \
   ~/.codex/skills/ask-deepseek
 ```
 
-仓库当前是私有的，克隆需要 GitHub 访问权限。如果目录已经存在，用 Git 的常规更新流程拉取；不要直接覆盖已有本地修改。
+仓库是私有的，克隆需要对应的 GitHub 权限。已有目录先检查本地修改，再按正常 Git 流程更新。
 
 ## 本地打包
 
-`render` 不联网、不调用模型，只生成待发送内容：
+`render` 不联网、不调用模型：
 
 ```bash
 cd ~/.codex/skills/ask-deepseek/tool
@@ -78,50 +80,25 @@ node bin/deepseek-oracle.mjs render \
   --file /absolute/path/to/relevant/file.ts
 ```
 
-渲染结果会写入：
+输出位于：
 
 ```text
 tool/sessions/<session-id>/prompt.md
 tool/sessions/<session-id>/meta.json
 ```
 
-输出包含会话 ID。`prompt.md` 是带行号的 Markdown 包；`meta.json` 记录状态、期望模式、时间戳和附件路径。
+附件规则：
 
-默认专家模式。用户明确要求快速模式时：
+- `--file` 可重复；目录会递归收集。
+- 跳过 `.git`、`node_modules`、`sessions` 和 `browser-profile`。
+- 单文件上限 1 MiB；拒绝二进制文件。
+- 路径去重并稳定排序。
 
-```bash
-node bin/deepseek-oracle.mjs render \
-  --prompt "快速检查这个正则是否覆盖 BOM 和 CRLF" \
-  --file /absolute/path/to/parser.mjs \
-  --mode quick
-```
+发送前仍需检查 `prompt.md`。工具不会自动识别所有商业秘密或个人资料。
 
-附件规则由 `tool/src/bundle.mjs` 执行：
+## 发送与恢复
 
-- `--file` 可以重复使用，目录会递归收集。
-- 自动跳过 `.git`、`node_modules`、`sessions` 和 `browser-profile`。
-- 单个文件上限 1 MiB。
-- 拒绝二进制文件。
-- 相同路径去重，输出按显示路径排序。
-
-发送前仍然要人工检查 `prompt.md`。该命令不会自动判断商业秘密、个人资料或上下文中偶然出现的敏感信息。
-
-## 会话状态
-
-`meta.json` 的状态机是防重发设计：
-
-| 状态 | 含义 | 下一步 |
-| --- | --- | --- |
-| `rendered` | 只完成本地渲染，或发送前门禁失败 | 检查内容后可重新发起 |
-| `submitting` | 已进入发送流程，结果未确定 | 禁止重发 |
-| `uncertain` | 点击发送后无法确认结果 | 只允许只读恢复 |
-| `completed` | 回答已保存 | 禁止重发同一会话 |
-
-状态文件权限是 `0600`，会话数据保留在本仓库的 `tool/sessions/` 下并已被 Git 忽略。不要手工改 `meta.json` 绕过保护。
-
-## EGO 备用通道与诊断
-
-正常单次咨询应使用 Codex 内置浏览器。只有在用户明确要求批量/脚本化，或确认内置浏览器不可用并同意备用通道时，才使用旧版 EGO 接口：
+只有用户已明确授权咨询时才运行：
 
 ```bash
 node bin/deepseek-oracle.mjs ask \
@@ -129,7 +106,18 @@ node bin/deepseek-oracle.mjs ask \
   --send
 ```
 
-这个命令必须带 `--send`。发送结果无法确认时，会话会停在 `uncertain`；确认准确的 DeepSeek 对话 URL 后，可只读恢复已有回答：
+`ask` 通过 EGO Lite 打开已登录页面，确认唯一统一输入框，填入问题，定位发送控件并读取稳定回答；它保留页面已有的独立开关状态，也没有旧版模式参数。需要指定开关状态时，由技能按真实页面流程设置并复核。
+
+会话状态：
+
+| 状态 | 含义 | 下一步 |
+| --- | --- | --- |
+| `rendered` | 只完成本地打包，或发送前停止 | 检查后可重新发起 |
+| `submitting` | 已进入发送流程，结果未确定 | 禁止重发 |
+| `uncertain` | 点击后无法确认 | 只读恢复 |
+| `completed` | 回答已保存 | 禁止重复发送 |
+
+只读恢复：
 
 ```bash
 node bin/deepseek-oracle.mjs recover \
@@ -137,28 +125,27 @@ node bin/deepseek-oracle.mjs recover \
   --url "https://chat.deepseek.com/a/chat/s/<conversation-id>"
 ```
 
-`recover` 不重新提交问题。它先确认目标页面包含本次运行标记，再保存最后的回答。
+`recover` 不重新提交问题。
 
-还有两个低层诊断命令用于专用 Chrome + CDP：
+## 诊断
+
+`launch` 和 `probe` 是可选的专用 Chrome + CDP 诊断通道：
 
 ```bash
 node bin/deepseek-oracle.mjs launch --port 9227
 node bin/deepseek-oracle.mjs probe --port 9227
 ```
 
-`launch` 使用仓库内的独立 `tool/browser-profile/`，不会导入正常 Chrome profile 的 Cookie。你需要自己在打开的窗口里登录。`probe` 只读取页面控件特征和当前模式，不发送消息。
+专用 profile 位于 `tool/browser-profile/`，不会导入正常 Chrome profile 的 Cookie。`probe` 只记录统一页面契约和匿名控件计数，不发送消息。
 
-## 安全模型
+## 安全边界
 
-- 不需要、不读取、不保存 DeepSeek API Key。
-- 不读取或复制正常浏览器 Cookie。
-- 不调用 DeepSeek 私有 API。
-- 不绕过登录、验证码、额度或平台限制。
-- 不安装全局 Oracle，也不修改 `~/.oracle`、DSH 或其他全局配置。
-- 自动发送必须通过模式与发送控件门禁；证据不足时停止。
-- 会话、浏览器 profile、日志和探测结果只保存在本仓库，且不应提交、上传或分享。
-
-DeepSeek 的回答始终是“未验证的第二意见”。是否采纳、如何实现、是否发布，仍由 Codex 和用户负责。
+- 不读取或保存 DeepSeek API Key、Cookie 或登录密码。
+- 不调用 DeepSeek 私有 API，不绕过登录、验证码、额度或平台限制。
+- 不让 DeepSeek 操作本机、Git、账号或发布流程。
+- 只发送脱敏后的最小必要内容。
+- 点击后状态不确定时禁止自动重发。
+- `sessions/`、`browser-profile/`、`last-probe.json` 和日志属于本机运行数据，不提交或外发。
 
 ## 验证
 
@@ -169,15 +156,4 @@ cd tool
 npm test
 ```
 
-测试覆盖：
-
-- 问题包生成、行号和模式元数据。
-- 专家/快速模式的可访问性证据检查。
-- 发送按钮定位和多行输入框场景。
-- 新回答提取。
-- EGO 发送、恢复和清理脚本的语法与 fail-closed 行为。
-- 结构化结果解析。
-
-## 仓库边界
-
-这个仓库是私有 Skill，不发布 npm 包，也没有包含登录凭证。`sessions/`、`browser-profile/`、`last-probe.json` 和 `*.log` 属于本机运行数据，不要提交或外发。
+测试覆盖本地打包、统一页面识别、发送按钮定位、多行输入、回答提取、EGO 发送与只读恢复脚本，以及不确定状态下的防重发行为。

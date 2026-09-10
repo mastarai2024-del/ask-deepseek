@@ -16,15 +16,16 @@ test("buildBundle preserves prompt and stable line numbers", () => {
   assert.match(bundle, /\s2 \| second/);
 });
 
-test("writeBundle preserves the selected DeepSeek mode in session metadata", async (t) => {
+test("writeBundle records a rendered session without obsolete UI state", async (t) => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), "deepseek-oracle-test-"));
   t.after(() => rm(rootDir, { recursive: true, force: true }));
   const result = await writeBundle({
     rootDir,
-    prompt: "Check the selected mode.",
+    prompt: "Check the unified composer.",
     files: [{ displayPath: "sample.txt", content: "sample" }],
-    expectedMode: "quick",
   });
   const meta = JSON.parse(await readFile(path.join(result.runDir, "meta.json"), "utf8"));
-  assert.equal(meta.expectedMode, "quick");
+  assert.equal(meta.state, "rendered");
+  assert.deepEqual(meta.files, ["sample.txt"]);
+  assert.deepEqual(Object.keys(meta).sort(), ["createdAt", "files", "id", "state"]);
 });

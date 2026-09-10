@@ -1,8 +1,7 @@
 import { spawn } from "node:child_process";
 import {
-  DEFAULT_DEEPSEEK_MODE,
-  DEEPSEEK_MODE_LABELS,
-  isSupportedDeepSeekMode,
+  DEEPSEEK_COMPOSER_NAME,
+  DEEPSEEK_COMPOSER_SELECTOR,
 } from "./deepseek-page.mjs";
 
 const RESULT_PREFIX = "DEEPSEEK_ORACLE_RESULT=";
@@ -48,25 +47,19 @@ function runEgoScript(script, timeoutMs) {
   });
 }
 
-export function buildConsultScript({ taskName, prompt, marker, responseTimeoutMs, expectedMode = DEFAULT_DEEPSEEK_MODE }) {
-  if (!isSupportedDeepSeekMode(expectedMode)) {
-    throw new Error(`Unsupported DeepSeek mode: ${expectedMode}. Use expert or quick.`);
-  }
+export function buildConsultScript({ taskName, prompt, marker, responseTimeoutMs }) {
   return `
 const TASK_NAME = ${JSON.stringify(taskName)}
 const PROMPT = ${JSON.stringify(prompt)}
 const MARKER = ${JSON.stringify(marker)}
-const EXPECTED_MODE = ${JSON.stringify(expectedMode)}
-const EXPECTED_MODE_LABEL = ${JSON.stringify(DEEPSEEK_MODE_LABELS[expectedMode])}
-const EXPERT_MODE_LABEL = ${JSON.stringify(DEEPSEEK_MODE_LABELS.expert)}
-const QUICK_MODE_LABEL = ${JSON.stringify(DEEPSEEK_MODE_LABELS.quick)}
+const COMPOSER_NAME = ${JSON.stringify(DEEPSEEK_COMPOSER_NAME)}
+const COMPOSER_SELECTOR = ${JSON.stringify(DEEPSEEK_COMPOSER_SELECTOR)}
 const PAYLOAD = PROMPT + "\\n\\n请勿在回答中复述以下运行标记。\\n" + MARKER
 const RESULT_PREFIX = ${JSON.stringify(RESULT_PREFIX)}
 const ERROR_PREFIX = ${JSON.stringify(ERROR_PREFIX)}
 const RESPONSE_TIMEOUT_MS = ${responseTimeoutMs}
 let sent = false
 let currentUrl = ""
-let verifiedMode = null
 
 const boxFromQuad = (quad) => {
   const xs = quad.filter((_, index) => index % 2 === 0)
@@ -76,60 +69,13 @@ const boxFromQuad = (quad) => {
 
 const center = (box) => ({ x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 })
 
-const checkedValue = (node) => {
-  const value = (node.properties || []).find((property) => property.name === "checked")?.value?.value
-  if (value === true || value === "true") return true
-  if (value === false || value === "false") return false
-  return null
-}
-
-const modeRadioNodes = (tree, name) => tree.nodes
-  .filter((node) => node.role?.value === "radio" && String(node.name?.value || "") === name)
-  .map((node) => ({ name, checked: checkedValue(node), backendDOMNodeId: node.backendDOMNodeId || null }))
-
-const inspectMode = (tree) => {
-  const expert = modeRadioNodes(tree, EXPERT_MODE_LABEL)
-  const quick = modeRadioNodes(tree, QUICK_MODE_LABEL)
-  if (expert.length !== 1 || quick.length !== 1) {
-    return { mode: "unknown", reason: "Expert and quick mode controls must each be uniquely identifiable.", expert, quick }
-  }
-  if (expert[0].checked === true && quick[0].checked === false) return { mode: "expert", reason: null, expert, quick }
-  if (quick[0].checked === true && expert[0].checked === false) return { mode: "quick", reason: null, expert, quick }
-  return { mode: "unknown", reason: "Expert and quick mode selection states are missing or contradictory.", expert, quick }
-}
-
-const readModeState = async () => inspectMode(await cdp("Accessibility.getFullAXTree"))
-
-const ensureExpectedMode = async () => {
-  let state = await readModeState()
-  if (state.mode === EXPECTED_MODE) {
-    verifiedMode = state.mode
-    return state
-  }
-  const expectedControl = state[EXPECTED_MODE]?.[0]
-  if (!expectedControl?.backendDOMNodeId || !["expert", "quick"].includes(state.mode)) {
-    throw new Error("DeepSeek " + EXPECTED_MODE_LABEL + " could not be uniquely confirmed (" + state.reason + "). No question was sent.")
-  }
-
-  await snapshotText()
-  await click("@" + expectedControl.backendDOMNodeId, { label: "select DeepSeek mode" })
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    await wait(0.5)
-    state = await readModeState()
-    if (state.mode === EXPECTED_MODE) {
-      verifiedMode = state.mode
-      return state
-    }
-  }
-  throw new Error("DeepSeek " + EXPECTED_MODE_LABEL + " could not be confirmed after switching. No question was sent.")
-}
-
 const readPageState = async () => {
   const expression = "(() => {" +
     "const marker = " + JSON.stringify(MARKER) + ";" +
     "const answers = [...document.querySelectorAll('.ds-assistant-message-main-content')].map((el) => (el.innerText || '').trim()).filter(Boolean);" +
-    "const composer = document.querySelector('textarea[name=\\\"search\\\"]');" +
-    "return { markerPresent: (document.body.innerText || '').includes(marker), composerLength: composer?.value?.length ?? -1, assistantCount: answers.length, lastAnswer: answers.at(-1) || '', url: location.href };" +
+    "const composers = [...document.querySelectorAll(" + JSON.stringify(COMPOSER_SELECTOR) + ")];" +
+    "const composer = composers[0];" +
+    "return { markerPresent: (document.body.innerText || '').includes(marker), composerCount: composers.length, composerLength: composer?.value?.length ?? -1, assistantCount: answers.length, lastAnswer: answers.at(-1) || '', url: location.href };" +
     "})()"
   const response = await cdp("Runtime.evaluate", { expression, returnByValue: true })
   if (response.exceptionDetails) throw new Error("Unable to read DeepSeek page state.")
@@ -142,17 +88,18 @@ try {
   const info = await pageInfo()
   currentUrl = String(info.url || "")
   if (String(info.url || "").includes("sign_in")) throw new Error("DeepSeek login is required in the Ego browser.")
-  await ensureExpectedMode()
   const beforeState = await readPageState()
+  if (beforeState.composerCount !== 1) throw new Error("DeepSeek unified composer was not uniquely found. No question was sent.")
   const beforeTree = await cdp("Accessibility.getFullAXTree")
-  const composer = beforeTree.nodes.find((node) => node.role?.value === "textbox" && node.backendDOMNodeId)
-  if (!composer) throw new Error("DeepSeek composer was not found.")
+  const composers = beforeTree.nodes.filter((node) => node.role?.value === "textbox" && String(node.name?.value || "").trim() === COMPOSER_NAME && node.backendDOMNodeId)
+  if (composers.length !== 1) throw new Error("DeepSeek unified composer accessibility node was not uniquely found. No question was sent.")
 
-  await fillInput('textarea[name="search"]', PAYLOAD)
+  await fillInput(COMPOSER_SELECTOR, PAYLOAD)
   await wait(0.5)
   const tree = await cdp("Accessibility.getFullAXTree")
-  const liveComposer = tree.nodes.find((node) => node.role?.value === "textbox" && node.backendDOMNodeId)
-  if (!liveComposer) throw new Error("DeepSeek composer disappeared before send.")
+  const liveComposers = tree.nodes.filter((node) => node.role?.value === "textbox" && String(node.name?.value || "").trim() === COMPOSER_NAME && node.backendDOMNodeId)
+  if (liveComposers.length !== 1) throw new Error("DeepSeek unified composer disappeared before send.")
+  const [liveComposer] = liveComposers
   const inputModel = await cdp("DOM.getBoxModel", { backendNodeId: liveComposer.backendDOMNodeId })
   const inputBox = boxFromQuad(inputModel.model.content)
   const candidates = []
@@ -197,8 +144,7 @@ try {
           answer,
           url: state.url,
           sent: true,
-          expectedMode: EXPECTED_MODE,
-          verifiedMode,
+          pageContract: "unified-model",
         }))
         resultEmitted = true
         break
@@ -216,8 +162,7 @@ try {
     message: String(error?.message || error),
     sent,
     url: currentUrl,
-    expectedMode: EXPECTED_MODE,
-    verifiedMode,
+    pageContract: "unified-model",
   }))
 }
 `;
@@ -280,14 +225,10 @@ export async function consultViaEgo({
   prompt,
   sessionId,
   responseTimeoutMs = 120_000,
-  expectedMode = DEFAULT_DEEPSEEK_MODE,
 }) {
-  if (!isSupportedDeepSeekMode(expectedMode)) {
-    throw new Error(`Unsupported DeepSeek mode: ${expectedMode}. Use expert or quick.`);
-  }
   const taskName = `DeepSeek Oracle ${sessionId}`;
   const marker = `[DEEPSEEK_ORACLE_RUN:${sessionId}]`;
-  const script = buildConsultScript({ taskName, prompt, marker, responseTimeoutMs, expectedMode });
+  const script = buildConsultScript({ taskName, prompt, marker, responseTimeoutMs });
   let processResult;
   try {
     processResult = await runEgoScript(script, responseTimeoutMs + 30_000);
@@ -299,11 +240,11 @@ export async function consultViaEgo({
   const result = parsePrefixedJson(combinedOutput, RESULT_PREFIX);
   const failure = parsePrefixedJson(combinedOutput, ERROR_PREFIX);
   const hardStop = /user is controlling|hard stop|taken control/i.test(combinedOutput);
-  const validResult = result?.expectedMode === expectedMode && result.verifiedMode === expectedMode;
+  const validResult = result?.pageContract === "unified-model" && Boolean(result.answer);
   if (shouldCleanupConsult({ result: validResult ? result : null, failure, hardStop })) await cleanupTask(taskName);
   if (result) {
     if (!validResult) {
-      const error = new Error(`DeepSeek submitted a response without verified ${expectedMode} mode; do not reuse this session.`);
+      const error = new Error("DeepSeek returned an unverified unified-page result; do not reuse this session.");
       error.sent = true;
       error.url = result.url || null;
       throw error;
@@ -314,8 +255,7 @@ export async function consultViaEgo({
     const error = new Error(failure.message);
     error.sent = Boolean(failure.sent);
     error.url = failure.url || null;
-    error.expectedMode = failure.expectedMode || null;
-    error.verifiedMode = failure.verifiedMode || null;
+    error.pageContract = failure.pageContract || null;
     throw error;
   }
   const error = new Error(hardStop

@@ -1,51 +1,33 @@
-export const DEFAULT_DEEPSEEK_MODE = "expert";
-
-export const DEEPSEEK_MODE_LABELS = Object.freeze({
-  expert: "专家模式",
-  quick: "快速模式",
+export const DEEPSEEK_COMPOSER_SELECTOR = 'textarea[name="search"]';
+export const DEEPSEEK_COMPOSER_NAME = "给 DeepSeek 发送消息";
+export const DEEPSEEK_CAPABILITY_LABELS = Object.freeze({
+  deepThinking: "深度思考",
+  webSearch: "智能搜索",
 });
-
-export const SUPPORTED_DEEPSEEK_MODES = Object.freeze(Object.keys(DEEPSEEK_MODE_LABELS));
-
-export function isSupportedDeepSeekMode(mode) {
-  return SUPPORTED_DEEPSEEK_MODES.includes(mode);
-}
 
 function center(box) {
   return { x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 };
 }
 
-function checkedValue(node) {
-  const value = node.properties?.find((property) => property.name === "checked")?.value?.value;
-  if (value === true || value === "true") return true;
-  if (value === false || value === "false") return false;
-  return null;
+function normalizedName(node) {
+  return String(node.name?.value ?? "").trim();
 }
 
-function modeRadioNodes(tree, name) {
-  return tree.nodes
-    .filter((node) => node.role?.value === "radio" && String(node.name?.value ?? "") === name)
-    .map((node) => ({
-      name,
-      checked: checkedValue(node),
-      backendDOMNodeId: node.backendDOMNodeId ?? null,
-    }));
-}
+export function inspectDeepSeekPage(tree) {
+  const composers = tree.nodes
+    .filter((node) => node.role?.value === "textbox" && normalizedName(node) === DEEPSEEK_COMPOSER_NAME)
+    .map((node) => ({ backendDOMNodeId: node.backendDOMNodeId ?? null }));
+  const text = staticTextValues(tree);
 
-export function inspectDeepSeekMode(tree) {
-  const expertNodes = modeRadioNodes(tree, DEEPSEEK_MODE_LABELS.expert);
-  const quickNodes = modeRadioNodes(tree, DEEPSEEK_MODE_LABELS.quick);
-  const details = { expert: expertNodes, quick: quickNodes };
-
-  if (expertNodes.length !== 1 || quickNodes.length !== 1) {
-    return { mode: "unknown", reason: "Expert and quick mode controls must each be uniquely identifiable.", ...details };
-  }
-
-  const [expert] = expertNodes;
-  const [quick] = quickNodes;
-  if (expert.checked === true && quick.checked === false) return { mode: "expert", reason: null, ...details };
-  if (quick.checked === true && expert.checked === false) return { mode: "quick", reason: null, ...details };
-  return { mode: "unknown", reason: "Expert and quick mode selection states are missing or contradictory.", ...details };
+  return {
+    contract: composers.length === 1 ? "unified-model" : "unknown",
+    composerCount: composers.length,
+    composer: composers[0] ?? null,
+    capabilityLabels: {
+      deepThinking: text.filter((value) => value === DEEPSEEK_CAPABILITY_LABELS.deepThinking).length,
+      webSearch: text.filter((value) => value === DEEPSEEK_CAPABILITY_LABELS.webSearch).length,
+    },
+  };
 }
 
 export function staticTextValues(tree) {
